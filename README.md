@@ -31,12 +31,14 @@ codexcli "seu prompt aqui"
 Imagem + texto:
 
 ```bash
-codexclimage path/to/image.png --prompt "Describe the image"
+codexcli --image path/to/image.png --prompt "Descreva a imagem"
 ```
+
+Se nenhum caminho de imagem for fornecido, o script usará a imagem mais recente no diretório atual. A flag `--prompt` é opcional e o padrão é "Explain what is in this image.".
 
 Pré-requisitos:
 
-- `jq`, `curl` e `uuidgen` disponíveis no sistema.
+- `jq`, `curl`, `uuidgen`, `file`, e `base64` disponíveis no sistema.
 - Arquivo `~/.codex/auth.json` contendo `tokens.access_token` e `tokens.account_id`.
 - É necessário ter efetuado login pelo menos uma vez no Codex oficial para que o arquivo `~/.codex/auth.json` seja criado.
 

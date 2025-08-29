@@ -8,9 +8,7 @@ CODEXCLI_BIN_DIR="${CODEXCLI_PREFIX}/bin"
 if [ -L "${CODEXCLI_BIN_DIR}/codexcli" ] || [ -f "${CODEXCLI_BIN_DIR}/codexcli" ]; then
   rm -f "${CODEXCLI_BIN_DIR}/codexcli" || true
 fi
-if [ -L "${CODEXCLI_BIN_DIR}/codexclimage" ] || [ -f "${CODEXCLI_BIN_DIR}/codexclimage" ]; then
-  rm -f "${CODEXCLI_BIN_DIR}/codexclimage" || true
-fi
+:
 
 if [ -d "${CODEXCLI_SHARE_DIR}" ]; then
   rm -rf "${CODEXCLI_SHARE_DIR}" || true

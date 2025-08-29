@@ -34,9 +34,7 @@ else
 fi
 
 chmod +x "${CODEXCLI_SHARE_DIR}/codexcli" 2>/dev/null || true
-chmod +x "${CODEXCLI_SHARE_DIR}/codexclimage" 2>/dev/null || true
 ln -sf "${CODEXCLI_SHARE_DIR}/codexcli" "${CODEXCLI_BIN_DIR}/codexcli"
-ln -sf "${CODEXCLI_SHARE_DIR}/codexclimage" "${CODEXCLI_BIN_DIR}/codexclimage"
 
 if ! printf %s ":${PATH}:" | grep -q ":${CODEXCLI_BIN_DIR}:"; then
   CODEXCLI_SHELL_NAME="$(basename "${SHELL:-sh}")"
