@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Usage:
+#   codexcli [YOUR_INPUT]
+# Example:
+#   codexcli "olá como vai?"
+#   codexcli ola como vai
+
+ACCESS_TOKEN=$(jq -r '.tokens.access_token' ~/.codex/auth.json)
+ACCOUNT_ID=$(jq -r '.tokens.account_id' ~/.codex/auth.json)
+SESSION_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+MODEL="gpt-5"
+
+if [ -z "${ACCESS_TOKEN:-}" ] || [ "$ACCESS_TOKEN" = "null" ]; then
+echo "ACCESS_TOKEN não encontrado em ~/.codex/auth.json. Rode 'codex login' antes."; exit 1
+fi
+if [ -z "${ACCOUNT_ID:-}" ] || [ "$ACCOUNT_ID" = "null" ]; then
+echo "ACCOUNT_ID não encontrado no auth.json. Tente relogar com 'codex login'."; exit 1
+fi
+
+# Carrega as mesmas instruções usadas pelo Codex CLI
+
+INSTRUCTIONS="$(cat ~/Projetos/codex/codex-rs/core/prompt.md; printf '\n'; cat ~/Projetos/codex/codex-rs/apply-patch/apply_patch_tool_instructions.md)"
+
+# Monta o payload exatamente como o CLI faz para gpt-5
+INPUT="$@"
+
+DATA="$(jq -n --arg model "$MODEL" \
+--arg instructions "$INSTRUCTIONS" \
+--arg text "$INPUT" \
+'{
+    model: $model,
+    instructions: $instructions,
+    input: [
+      { type: "message", role: "user",
+        content: [ { type: "input_text", text: $text } ] }
+    ],
+    tools: [],
+    tool_choice: "auto",
+    parallel_tool_calls: false,
+    reasoning: { effort: "minimal", summary: "auto" },
+    store: false,
+    stream: true,
+    include: ["reasoning.encrypted_content"]
+}')"
+
+curl -sS -N https://chatgpt.com/backend-api/codex/responses \
+-X POST \
+-H "Authorization: Bearer $ACCESS_TOKEN" \
+-H "chatgpt-account-id: $ACCOUNT_ID" \
+-H "OpenAI-Beta: responses=experimental" \
+-H "Content-Type: application/json" \
+-H "Accept: text/event-stream" \
+-H "originator: codex_cli_rs" \
+-H "User-Agent: codex_cli_rs" \
+-H "session_id: $SESSION_ID" \
+-d "$DATA" | awk '/^event: response.output_text.delta$/ { want=1; next } \
+       /^event: response\.output_text\.done$/  { print "{\"__eol__\":true}"; fflush(); next } \
+       want && /^data: / { sub(/^data: /,""); print; fflush(); want=0; next }' \
+| jq -r --unbuffered 'if .delta? then .delta elif .eol? then "EOL" else empty end' \
+| awk '{ if ($0=="EOL") { print ""; fflush(); } else { printf "%s", $0; fflush(); } }'

@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Usage:
+#   codexclimage [IMAGE_PATH] [--prompt "your prompt"]
+# Example:
+#   codexclimage myimage.png --prompt "Describe the image content"
+
+IMAGE_PATH=""
+TEXT="Explain what is in this image."
+MODEL="gpt-5"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --prompt)
+      TEXT="$2"
+      shift 2
+      ;;
+    *)
+      if [[ -z "$IMAGE_PATH" ]]; then
+        IMAGE_PATH="$1"
+      fi
+      shift
+      ;;
+  esac
+done
+
+ACCESS_TOKEN=$(jq -r '.tokens.access_token' ~/.codex/auth.json 2>/dev/null || echo "")
+ACCOUNT_ID=$(jq -r '.tokens.account_id' ~/.codex/auth.json 2>/dev/null || echo "")
+
+if [ -z "${ACCESS_TOKEN:-}" ] || [ "${ACCESS_TOKEN}" = "null" ]; then
+  echo "ACCESS_TOKEN not found in ~/.codex/auth.json. Run 'codex login'." >&2
+  exit 1
+fi
+if [ -z "${ACCOUNT_ID:-}" ] || [ "${ACCOUNT_ID}" = "null" ]; then
+  echo "ACCOUNT_ID not found in ~/.codex/auth.json. Run 'codex login'." >&2
+  exit 1
+fi
+
+if [ -z "${IMAGE_PATH}" ]; then
+  IMAGE_PATH=$(ls -1t *.png *.jpg *.jpeg *.webp 2>/dev/null | head -n1 || true)
+fi
+if [ -z "${IMAGE_PATH}" ] || [ ! -f "${IMAGE_PATH}" ]; then
+  echo "Image file not found. Pass a path or place an image in the current directory." >&2
+  exit 1
+fi
+
+if ! command -v file >/dev/null 2>&1; then
+  echo "'file' command is required to detect mime type." >&2
+  exit 1
+fi
+
+INSTRUCTIONS="$(cat ~/Projetos/codex/codex-rs/core/prompt.md; printf '\n'; cat ~/Projetos/codex/codex-rs/apply-patch/apply_patch_tool_instructions.md)"
+
+SESSION_ID="${SESSION_ID:-$( (uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid) | tr '[:upper:]' '[:lower:]' )}"
+MIME=$(file --mime-type -b "${IMAGE_PATH}")
+B64=$(base64 < "${IMAGE_PATH}" | tr -d '\n')
+DATA_URL="data:${MIME};base64,${B64}"
+
+DATA=$(jq -n --arg model "${MODEL}" \
+  --arg instructions "${INSTRUCTIONS}" \
+  --arg text "${TEXT}" \
+  --arg image_url "${DATA_URL}" \
+  '{
+    model: $model,
+    instructions: $instructions,
+    input: [
+      { type: "message", role: "user",
+        content: [
+          { type: "input_text", text: $text },
+          { type: "input_image", image_url: $image_url }
+        ]
+      }
+    ],
+    tools: [],
+    tool_choice: "auto",
+    parallel_tool_calls: false,
+    reasoning: { effort: "minimal", summary: "auto" },
+    store: false,
+    stream: true,
+    include: ["reasoning.encrypted_content"]
+  }')
+
+curl -sS -N https://chatgpt.com/backend-api/codex/responses \
+  -X POST \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  -H "chatgpt-account-id: ${ACCOUNT_ID}" \
+  -H "OpenAI-Beta: responses=experimental" \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -H "originator: codex_cli_rs" \
+  -H "User-Agent: codex_cli_rs" \
+  -H "session_id: ${SESSION_ID}" \
+  -d "${DATA}" | awk '/^event: response.output_text.delta$/ { want=1; next } \
+         /^event: response\.output_text\.done$/  { print "{\"__eol__\":true}"; fflush(); next } \
+         want && /^data: / { sub(/^data: /,""); print; fflush(); want=0; next }' \
+  | jq -r --unbuffered 'if .delta? then .delta elif .eol? then "EOL" else empty end' \
+  | awk '{ if ($0=="EOL") { print ""; fflush(); } else { printf "%s", $0; fflush(); } }'
