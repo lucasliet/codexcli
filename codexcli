@@ -145,7 +145,8 @@ CODEXCLI_DATA=$(jq -n --arg model "$CODEXCLI_MODEL" \
 
 CODEXCLI_TEMP_RESPONSE_FILE=$(mktemp)
 
-curl -sS -N https://chatgpt.com/backend-api/codex/responses \
+# Executar curl e capturar saída completa (incluindo erros)
+curl_output=$(curl -sS -N https://chatgpt.com/backend-api/codex/responses \
 -X POST \
 -H "Authorization: Bearer $CODEXCLI_ACCESS_TOKEN" \
 -H "chatgpt-account-id: $CODEXCLI_ACCOUNT_ID" \
@@ -155,7 +156,18 @@ curl -sS -N https://chatgpt.com/backend-api/codex/responses \
 -H "originator: codex_cli_rs" \
 -H "User-Agent: codex_cli_rs" \
 -H "session_id: $CODEXCLI_SESSION_ID" \
--d "$CODEXCLI_DATA" | awk '/^event: response.output_text.delta$/ { want=1; next } \
+-d "$CODEXCLI_DATA" 2>&1)
+
+# Verificar se há erro na resposta (JSON com campo "error")
+if echo "$curl_output" | jq -e '.error' >/dev/null 2>&1; then
+  error_msg=$(echo "$curl_output" | jq -r '.error.message // "Erro desconhecido no endpoint"')
+  echo "Erro do endpoint: $error_msg" >&2
+  rm -f "$CODEXCLI_TEMP_RESPONSE_FILE"
+  exit 1
+fi
+
+# Processar streaming se não houver erro
+echo "$curl_output" | awk '/^event: response.output_text.delta$/ { want=1; next } \
        /^event: response\.output_text\.done$/  { print "{\"__eol__\":true}"; fflush(); next } \
        want && /^data: / { sub(/^data: /,""); print; fflush(); want=0; next }' \
 | jq -r --unbuffered 'if .delta? then .delta elif .eol? then "EOL" else empty end' \
@@ -164,6 +176,11 @@ curl -sS -N https://chatgpt.com/backend-api/codex/responses \
 
 CODEXCLI_ASSISTANT_TEXT=$(cat "$CODEXCLI_TEMP_RESPONSE_FILE")
 rm -f "$CODEXCLI_TEMP_RESPONSE_FILE"
+
+if [ -z "$CODEXCLI_ASSISTANT_TEXT" ]; then
+  echo "Nenhuma resposta recebida do LLM." >&2
+  exit 1
+fi
 
 CODEXCLI_ASSISTANT_MSG=$(jq -n --arg text "$CODEXCLI_ASSISTANT_TEXT" '{type:"message",role:"assistant",content:[{type:"output_text",text:$text}]}')
 CODEXCLI_MESSAGES+=("$CODEXCLI_ASSISTANT_MSG")
