@@ -117,7 +117,9 @@ declare -a CODEXCLI_MESSAGES
 if [ -f "$CODEXCLI_HISTORY_FILE" ]; then
   CODEXCLI_MESSAGES=()
   while IFS= read -r line; do
-    CODEXCLI_MESSAGES+=("$line")
+    if echo "$line" | jq -e . >/dev/null 2>&1; then
+      CODEXCLI_MESSAGES+=("$line")
+    fi
   done < "$CODEXCLI_HISTORY_FILE"
 else
   CODEXCLI_MESSAGES=()
@@ -125,9 +127,7 @@ fi
 
 CODEXCLI_USER_MSG=$(jq -n --argjson content "$CODEXCLI_CONTENT_JSON" '{type:"message",role:"user",content:$content}')
 CODEXCLI_MESSAGES+=("$CODEXCLI_USER_MSG")
-
-CODEXCLI_INPUT_JSON=$(printf "%s," "${CODEXCLI_MESSAGES[@]}")
-CODEXCLI_INPUT_JSON="[${CODEXCLI_INPUT_JSON%,}]"
+CODEXCLI_INPUT_JSON=$(printf '%s\n' "${CODEXCLI_MESSAGES[@]}" | jq -s '.')
 
 CODEXCLI_DATA=$(jq -n --arg model "$CODEXCLI_MODEL" \
 --arg instructions "$CODEXCLI_INSTRUCTIONS" \
