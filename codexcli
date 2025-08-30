@@ -9,6 +9,7 @@ CODEXCLI_ACCESS_TOKEN=$(jq -r '.tokens.access_token' ~/.codex/auth.json)
 CODEXCLI_ACCOUNT_ID=$(jq -r '.tokens.account_id' ~/.codex/auth.json)
 CODEXCLI_SESSION_ID="${SESSION_ID:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
 CODEXCLI_MODEL="gpt-5"
+CODEXCLI_HISTORY_FILE="/tmp/codexcli_messages"
 CODEXCLI_IMAGE_FLAG=0
 CODEXCLI_IMAGE_PATH=""
 CODEXCLI_TEXT=""
@@ -112,15 +113,29 @@ else
   CODEXCLI_CONTENT_JSON=$(jq -n --arg text "$CODEXCLI_TEXT" '[{type:"input_text", text:$text}]')
 fi
 
+declare -a CODEXCLI_MESSAGES
+if [ -f "$CODEXCLI_HISTORY_FILE" ]; then
+  CODEXCLI_MESSAGES=()
+  while IFS= read -r line; do
+    CODEXCLI_MESSAGES+=("$line")
+  done < "$CODEXCLI_HISTORY_FILE"
+else
+  CODEXCLI_MESSAGES=()
+fi
+
+CODEXCLI_USER_MSG=$(jq -n --argjson content "$CODEXCLI_CONTENT_JSON" '{type:"message",role:"user",content:$content}')
+CODEXCLI_MESSAGES+=("$CODEXCLI_USER_MSG")
+
+CODEXCLI_INPUT_JSON=$(printf "%s," "${CODEXCLI_MESSAGES[@]}")
+CODEXCLI_INPUT_JSON="[${CODEXCLI_INPUT_JSON%,}]"
+
 CODEXCLI_DATA=$(jq -n --arg model "$CODEXCLI_MODEL" \
 --arg instructions "$CODEXCLI_INSTRUCTIONS" \
---argjson content "$CODEXCLI_CONTENT_JSON" \
+--arg input "$CODEXCLI_INPUT_JSON" \
 '{
     model: $model,
     instructions: $instructions,
-    input: [
-      { type: "message", role: "user", content: $content }
-    ],
+    input: ($input | fromjson),
     tools: [],
     tool_choice: "auto",
     parallel_tool_calls: false,
@@ -129,6 +144,8 @@ CODEXCLI_DATA=$(jq -n --arg model "$CODEXCLI_MODEL" \
     stream: true,
     include: ["reasoning.encrypted_content"]
 }')
+
+CODEXCLI_TEMP_RESPONSE_FILE=$(mktemp)
 
 curl -sS -N https://chatgpt.com/backend-api/codex/responses \
 -X POST \
@@ -144,4 +161,12 @@ curl -sS -N https://chatgpt.com/backend-api/codex/responses \
        /^event: response\.output_text\.done$/  { print "{\"__eol__\":true}"; fflush(); next } \
        want && /^data: / { sub(/^data: /,""); print; fflush(); want=0; next }' \
 | jq -r --unbuffered 'if .delta? then .delta elif .eol? then "EOL" else empty end' \
-| awk '{ if ($0=="EOL") { print ""; fflush(); } else { printf "%s", $0; fflush(); } }'
+| awk '{ if ($0=="EOL") { print ""; fflush(); } else { printf "%s", $0; fflush(); } }' \
+| tee "$CODEXCLI_TEMP_RESPONSE_FILE"
+
+CODEXCLI_ASSISTANT_TEXT=$(cat "$CODEXCLI_TEMP_RESPONSE_FILE")
+rm -f "$CODEXCLI_TEMP_RESPONSE_FILE"
+
+CODEXCLI_ASSISTANT_MSG=$(jq -n --arg text "$CODEXCLI_ASSISTANT_TEXT" '{type:"message",role:"assistant",content:[{type:"output_text",text:$text}]}')
+CODEXCLI_MESSAGES+=("$CODEXCLI_ASSISTANT_MSG")
+printf '%s\n' "${CODEXCLI_MESSAGES[@]}" > "$CODEXCLI_HISTORY_FILE"
