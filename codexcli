@@ -116,11 +116,9 @@ fi
 declare -a CODEXCLI_MESSAGES
 if [ -f "$CODEXCLI_HISTORY_FILE" ]; then
   CODEXCLI_MESSAGES=()
-  while IFS= read -r line; do
-    if echo "$line" | jq -e . >/dev/null 2>&1; then
-      CODEXCLI_MESSAGES+=("$line")
-    fi
-  done < "$CODEXCLI_HISTORY_FILE"
+  while IFS= read -r obj; do
+    CODEXCLI_MESSAGES+=("$obj")
+  done < <(jq -c -s '.[]' "$CODEXCLI_HISTORY_FILE" 2>/dev/null || true)
 else
   CODEXCLI_MESSAGES=()
 fi
